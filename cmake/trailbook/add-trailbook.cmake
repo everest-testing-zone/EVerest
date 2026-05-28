@@ -84,7 +84,7 @@ macro(_add_trailbook_setup_build_directory)
         add_custom_command(
             OUTPUT
                 ${CHECK_DONE_FILE_SETUP_BUILD_DIRECTORY}
-            DEPENDS            
+            DEPENDS
                 trailbook_${args_NAME}_stage_prepare_sphinx_source_before
                 $<TARGET_PROPERTY:trailbook_${args_NAME},ADDITIONAL_DEPS_STAGE_PREPARE_SPHINX_SOURCE_BEFORE>
                 ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/filelist_manager.py
@@ -202,35 +202,73 @@ endmacro()
 # This macro is for internal use only
 #
 # It is used in the function add_trailbook.
+# It adds a custom command to create the current_instance_info.json file for the currently build instance.
+# These json files from different instances are used to build a versions.json file.
+# The latter can be used e.g. to show a table of existing versions.
+# current_instance_info.json is copied into the deployed folder for the respective instance as info.json, so future aggregations can pick it up.
+macro(_add_trailbook_create_instance_info_file_command)
+    # Resolve display name (fallback to instance name) and write info.json for the current instance.
+    if("${TRAILBOOK_${args_NAME}_DISPLAY_NAME}" STREQUAL "")
+        set(TRAILBOOK_INSTANCE_DISPLAY_NAME "${TRAILBOOK_${args_NAME}_INSTANCE_NAME}")
+    else()
+        set(TRAILBOOK_INSTANCE_DISPLAY_NAME "${TRAILBOOK_${args_NAME}_DISPLAY_NAME}")
+    endif()
+    if(TRAILBOOK_INSTANCE_IS_RELEASE)
+        set(_trailbook_is_release_json "true")
+    else()
+        set(_trailbook_is_release_json "false")
+    endif()
+
+    add_custom_command(
+        OUTPUT
+            ${CURRENT_INSTANCE_INFO_JSON}
+        DEPENDS
+            ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/create_instance_info.py
+            trailbook_${args_NAME}_stage_prepare_sphinx_source_before
+            $<TARGET_PROPERTY:trailbook_${args_NAME},ADDITIONAL_DEPS_STAGE_PREPARE_SPHINX_SOURCE_BEFORE>
+        COMMENT
+            "Trailbook: ${args_NAME} - Creating instance info file"
+        COMMAND
+            ${CMAKE_COMMAND} -E rm -f ${CURRENT_INSTANCE_INFO_JSON}
+        COMMAND
+            ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/create_instance_info.py
+            "--json-output-path" "${CURRENT_INSTANCE_INFO_JSON}"
+            "--instance-name" "${TRAILBOOK_${args_NAME}_INSTANCE_NAME}"
+            "--display-name" "${TRAILBOOK_INSTANCE_DISPLAY_NAME}"
+            "--is-release" "${_trailbook_is_release_json}"
+    )
+endmacro()
+
+# This macro is for internal use only
+#
+# It is used in the function add_trailbook.
 # It adds a custom command to create the metadata file(s) for the trailbook instance.
-# The metadata YAML file is used by Sphinx during the build process.
 # The metadata JSON file can be used for dynamic features in the built documentation, such as the version switcher dropdown.
 # It contains a list of all versions available in the multiversion root directory.
 macro(_add_trailbook_create_metadata_file_command)
-    set(METADATA_YAML_FILE "${CMAKE_CURRENT_BINARY_DIR}/metadata_${args_NAME}.yaml")
     set(METADATA_JSON_FILE "${CMAKE_CURRENT_BINARY_DIR}/metadata_${args_NAME}.json")
 
     add_custom_command(
         OUTPUT
-            ${METADATA_YAML_FILE}
             ${METADATA_JSON_FILE}
         DEPENDS
             ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/create_metadata_file.py
             ${STEM_FILES_BUILD_DIR}
             ${CHECK_DONE_FILE_SETUP_BUILD_DIRECTORY}
+            ${CURRENT_INSTANCE_INFO_JSON}
             trailbook_${args_NAME}_stage_prepare_sphinx_source_before
             $<TARGET_PROPERTY:trailbook_${args_NAME},ADDITIONAL_DEPS_STAGE_PREPARE_SPHINX_SOURCE_BEFORE>
         COMMENT
             "Trailbook: ${args_NAME} - Creating metadata file(s)"
         COMMAND
-            ${CMAKE_COMMAND} -E rm -f ${METADATA_YAML_FILE}
+            ${CMAKE_COMMAND} -E rm -f ${METADATA_JSON_FILE}
         COMMAND
             ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/create_metadata_file.py
             --multiversion-root-directory "${TRAILBOOK_BUILD_DIRECTORY}"
-            "--yaml-output-path" "${METADATA_YAML_FILE}"
             "--json-output-path" "${METADATA_JSON_FILE}"
-            --additional-version "${TRAILBOOK_${args_NAME}_INSTANCE_NAME}"
+            --current-instance-info "${CURRENT_INSTANCE_INFO_JSON}"
     )
 endmacro()
 
@@ -261,7 +299,6 @@ macro(_add_trailbook_sphinx_build_command)
             --data-file ${CMAKE_CURRENT_BINARY_DIR}/sphinx_build_filelist.yaml
             --root-directory ${TRAILBOOK_INSTANCE_BUILD_DIRECTORY}/
         COMMAND
-            EVEREST_METADATA_YAML_PATH=${METADATA_YAML_FILE}
             ${_SPHINX_BUILD_EXECUTABLE}
             -b html
             ${TRAILBOOK_INSTANCE_SOURCE_DIRECTORY}
@@ -396,63 +433,29 @@ endmacro()
 # This macro is for internal use only
 #
 # It is used in the function add_trailbook.
-# It adds a custom command to copy the versions_index.html file to the multiversion root directory
+# It installs a static versions_index.html into the multiversion root directory.
+# The page reads versions.json at runtime via JavaScript, so it stays in sync
+# with the deployed set of instances without needing per-build regeneration
+# (and without depending on any particular instance's Sphinx output).
 macro(_add_trailbook_copy_versions_index_command)
     set(CHECK_DONE_FILE_COPY_VERSIONS_INDEX "${CMAKE_CURRENT_BINARY_DIR}/copy_versions_index.check_done")
     set(TRAILBOOK_VERSIONS_INDEX_FILE "${TRAILBOOK_BUILD_DIRECTORY}/versions_index.html")
-    set(TRAILBOOK_INSTANCE_VERSIONS_INDEX_FILE "${TRAILBOOK_INSTANCE_BUILD_DIRECTORY}/versions_index.html")
-    set(CHECK_DONE_FILE_CHECK_LATEST_INSTANCE "${CMAKE_CURRENT_BINARY_DIR}/check_latest_instance.check_done")
-    add_custom_command(
-        OUTPUT
-            ${TRAILBOOK_INSTANCE_VERSIONS_INDEX_FILE}
-        DEPENDS
-            trailbook_${args_NAME}_stage_postprocess_sphinx_before
-            $<TARGET_PROPERTY:trailbook_${args_NAME},ADDITIONAL_DEPS_STAGE_POSTPROCESS_SPHINX_BEFORE>
-            ${CHECK_DONE_FILE_SPHINX_BUILD_COMMAND}
-            ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/check_path_exists.py
-        COMMENT
-            "Trailbook: ${args_NAME} - Checking for versions_index.html in built documentation"
-        COMMAND
-            ${Python3_EXECUTABLE}
-            ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/check_path_exists.py
-            --file "${TRAILBOOK_INSTANCE_VERSIONS_INDEX_FILE}"
-            --return-zero-if-exists
-    )
-    add_custom_command(
-        OUTPUT
-            ${CHECK_DONE_FILE_CHECK_LATEST_INSTANCE}
-        DEPENDS
-            trailbook_${args_NAME}_stage_postprocess_sphinx_before
-            $<TARGET_PROPERTY:trailbook_${args_NAME},ADDITIONAL_DEPS_STAGE_POSTPROCESS_SPHINX_BEFORE>
-            ${CHECK_DONE_FILE_SPHINX_BUILD_COMMAND}
-            ${CHECK_DONE_FILE_REPLACE_LATEST}
-            ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/check_path_exists.py
-        COMMENT
-            "Trailbook: ${args_NAME} - Checking for latest/ in multiversion root directory"
-        COMMAND
-            ${Python3_EXECUTABLE}
-            ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/check_path_exists.py
-            --directory ${TRAILBOOK_BUILD_DIRECTORY}/latest
-            --return-zero-if-exists
-        COMMAND
-            ${CMAKE_COMMAND} -E touch ${CHECK_DONE_FILE_CHECK_LATEST_INSTANCE}
-    )
+    set(TRAILBOOK_VERSIONS_INDEX_SOURCE "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/templates/versions_index.html")
     add_custom_command(
         OUTPUT
             ${CHECK_DONE_FILE_COPY_VERSIONS_INDEX}
         DEPENDS
             trailbook_${args_NAME}_stage_postprocess_sphinx_before
             $<TARGET_PROPERTY:trailbook_${args_NAME},ADDITIONAL_DEPS_STAGE_POSTPROCESS_SPHINX_BEFORE>
-            ${CHECK_DONE_FILE_SPHINX_BUILD_COMMAND}
-            ${TRAILBOOK_INSTANCE_VERSIONS_INDEX_FILE}
-            ${CHECK_DONE_FILE_CHECK_LATEST_INSTANCE}
+            ${CHECK_DONE_FILE_SETUP_BUILD_DIRECTORY}
+            ${TRAILBOOK_VERSIONS_INDEX_SOURCE}
         COMMENT
-            "Trailbook: ${args_NAME} - Copying versions_index.html to multiversion root directory"
+            "Trailbook: ${args_NAME} - Installing static versions_index.html in multiversion root directory"
         COMMAND
             ${CMAKE_COMMAND} -E rm -f ${TRAILBOOK_VERSIONS_INDEX_FILE}
         COMMAND
             ${CMAKE_COMMAND} -E copy
-            ${TRAILBOOK_INSTANCE_VERSIONS_INDEX_FILE}
+            ${TRAILBOOK_VERSIONS_INDEX_SOURCE}
             ${TRAILBOOK_VERSIONS_INDEX_FILE}
         COMMAND
             ${CMAKE_COMMAND} -E touch ${CHECK_DONE_FILE_COPY_VERSIONS_INDEX}
@@ -483,6 +486,34 @@ macro(_add_trailbook_copy_versions_json_command)
             ${TRAILBOOK_VERSIONS_JSON_FILE}
         COMMAND
             ${CMAKE_COMMAND} -E touch ${CHECK_DONE_FILE_COPY_VERSIONS_JSON}
+    )
+endmacro()
+
+# This macro is for internal use only
+#
+# It is used in the function add_trailbook.
+# It copies the current instance's info.json into the instance build directory,
+# so that future aggregations (after this instance has been deployed) can read its
+# display name, release flag, etc. from the deployed docs repo.
+macro(_add_trailbook_copy_instance_info_command)
+    set(CHECK_DONE_FILE_COPY_INSTANCE_INFO "${CMAKE_CURRENT_BINARY_DIR}/copy_instance_info.check_done")
+    set(TRAILBOOK_INSTANCE_INFO_FILE "${TRAILBOOK_INSTANCE_BUILD_DIRECTORY}/info.json")
+    add_custom_command(
+        OUTPUT
+            ${CHECK_DONE_FILE_COPY_INSTANCE_INFO}
+        DEPENDS
+            trailbook_${args_NAME}_stage_postprocess_sphinx_before
+            $<TARGET_PROPERTY:trailbook_${args_NAME},ADDITIONAL_DEPS_STAGE_POSTPROCESS_SPHINX_BEFORE>
+            ${CHECK_DONE_FILE_SPHINX_BUILD_COMMAND}
+            ${CURRENT_INSTANCE_INFO_JSON}
+        COMMENT
+            "Trailbook: ${args_NAME} - Copying info.json to instance build directory"
+        COMMAND
+            ${CMAKE_COMMAND} -E copy
+            ${CURRENT_INSTANCE_INFO_JSON}
+            ${TRAILBOOK_INSTANCE_INFO_FILE}
+        COMMAND
+            ${CMAKE_COMMAND} -E touch ${CHECK_DONE_FILE_COPY_INSTANCE_INFO}
     )
 endmacro()
 
@@ -578,6 +609,7 @@ function(add_trailbook)
     option(TRAILBOOK_${args_NAME}_DOWNLOAD_ALL_VERSIONS "Download all versions for trailbook ${args_NAME} and build complete trailbook" OFF)
     option(TRAILBOOK_${args_NAME}_IS_RELEASE "If enabled, the trailbook ${args_NAME} will be marked as release version in versions index" ON)
     set(TRAILBOOK_${args_NAME}_INSTANCE_NAME "local" CACHE STRING "Instance name for trailbook ${args_NAME}")
+    set(TRAILBOOK_${args_NAME}_DISPLAY_NAME "" CACHE STRING "Display name shown in the version switcher for trailbook ${args_NAME} (defaults to instance name if empty)")
     option(TRAILBOOK_${args_NAME}_OVERWRITE_EXISTING_INSTANCE "Overwrite existing instance with name ${TRAILBOOK_${args_NAME}_INSTANCE_NAME} if it exists" OFF)
     # Check that at least one of DOWNLOAD_ALL_VERSIONS or IS_RELEASE is ON
     if(NOT TRAILBOOK_${args_NAME}_DOWNLOAD_ALL_VERSIONS AND NOT TRAILBOOK_${args_NAME}_IS_RELEASE)
@@ -640,6 +672,9 @@ function(add_trailbook)
     set(TRAILBOOK_INSTANCE_BUILD_DIRECTORY "${TRAILBOOK_BUILD_DIRECTORY}/${TRAILBOOK_${args_NAME}_INSTANCE_NAME}")
     set(TRAILBOOK_INSTANCE_IS_RELEASE "${TRAILBOOK_${args_NAME}_IS_RELEASE}")
     set(TRAILBOOK_INSTANCE_DOWNLOAD_ALL_VERSIONS "${TRAILBOOK_${args_NAME}_DOWNLOAD_ALL_VERSIONS}")
+
+    set(CURRENT_INSTANCE_INFO_JSON "${CMAKE_CURRENT_BINARY_DIR}/current_instance_info.json")
+    _add_trailbook_create_instance_info_file_command()
 
     message(STATUS "Adding trailbook:               ${args_NAME}")
     message(STATUS "  Stem directory:               ${args_STEM_DIRECTORY}")
@@ -709,6 +744,7 @@ function(add_trailbook)
     endif()
     _add_trailbook_copy_versions_index_command()
     _add_trailbook_copy_versions_json_command()
+    _add_trailbook_copy_instance_info_command()
 
     set(DEPS_STAGE_POSTPROCESS_SPHINX_AFTER
         trailbook_${args_NAME}_stage_postprocess_sphinx_before
@@ -716,6 +752,7 @@ function(add_trailbook)
         ${CHECK_DONE_FILE_COPY_404}
         ${CHECK_DONE_FILE_COPY_VERSIONS_INDEX}
         ${CHECK_DONE_FILE_COPY_VERSIONS_JSON}
+        ${CHECK_DONE_FILE_COPY_INSTANCE_INFO}
         ${CHECK_DONE_FILE_RENDER_REDIRECT_TEMPLATE}
     )
     add_custom_target(
