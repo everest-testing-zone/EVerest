@@ -339,6 +339,10 @@ macro(_add_trailbook_replace_latest_command)
             trailbook_${args_NAME}_stage_postprocess_sphinx_before
             $<TARGET_PROPERTY:trailbook_${args_NAME},ADDITIONAL_DEPS_STAGE_POSTPROCESS_SPHINX_BEFORE>
             ${CHECK_DONE_FILE_SPHINX_BUILD_COMMAND}
+            # Wait for info.json to be placed inside the instance build dir
+            # before snapshotting it as 'latest', otherwise the snapshot is
+            # missing info.json.
+            ${CHECK_DONE_FILE_COPY_INSTANCE_INFO}
         COMMENT
             "Trailbook: ${args_NAME} - Replacing 'latest' copy with copy of current instance"
         COMMAND
@@ -738,14 +742,14 @@ function(add_trailbook)
             $<TARGET_PROPERTY:trailbook_${args_NAME},ADDITIONAL_DEPS_STAGE_POSTPROCESS_SPHINX_BEFORE>
             trailbook_${args_NAME}_stage_build_sphinx_after
     )
-    _add_trailbook_copy_versions_index_command()
-    _add_trailbook_copy_versions_json_command()
-    _add_trailbook_copy_instance_info_command()
     if(TRAILBOOK_INSTANCE_IS_RELEASE)
         _add_trailbook_replace_latest_command()
         _add_trailbook_copy_404_command()
         _add_trailbook_render_redirect_template_command()
     endif()
+    _add_trailbook_copy_instance_info_command()
+    _add_trailbook_copy_versions_index_command()
+    _add_trailbook_copy_versions_json_command()
 
     set(DEPS_STAGE_POSTPROCESS_SPHINX_AFTER
         trailbook_${args_NAME}_stage_postprocess_sphinx_before
