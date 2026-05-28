@@ -339,6 +339,10 @@ macro(_add_trailbook_replace_latest_command)
             trailbook_${args_NAME}_stage_postprocess_sphinx_before
             $<TARGET_PROPERTY:trailbook_${args_NAME},ADDITIONAL_DEPS_STAGE_POSTPROCESS_SPHINX_BEFORE>
             ${CHECK_DONE_FILE_SPHINX_BUILD_COMMAND}
+            # Wait for info.json to be placed inside the instance build dir
+            # before snapshotting it as 'latest', otherwise the snapshot is
+            # missing info.json.
+            ${CHECK_DONE_FILE_COPY_INSTANCE_INFO}
         COMMENT
             "Trailbook: ${args_NAME} - Replacing 'latest' copy with copy of current instance"
         COMMAND
@@ -450,6 +454,7 @@ macro(_add_trailbook_copy_versions_index_command)
             $<TARGET_PROPERTY:trailbook_${args_NAME},ADDITIONAL_DEPS_STAGE_POSTPROCESS_SPHINX_BEFORE>
             ${CHECK_DONE_FILE_SETUP_BUILD_DIRECTORY}
             ${TRAILBOOK_VERSIONS_INDEX_SOURCE}
+            trailbook_${args_NAME}_copy_instance_info_file
         COMMENT
             "Trailbook: ${args_NAME} - Installing static versions_index.html in multiversion root directory"
         COMMAND
@@ -515,6 +520,13 @@ macro(_add_trailbook_copy_instance_info_command)
             ${TRAILBOOK_INSTANCE_INFO_FILE}
         COMMAND
             ${CMAKE_COMMAND} -E touch ${CHECK_DONE_FILE_COPY_INSTANCE_INFO}
+    )
+    add_custom_target(
+        trailbook_${args_NAME}_copy_instance_info_file
+        DEPENDS
+            ${CHECK_DONE_FILE_COPY_INSTANCE_INFO}
+        COMMENT
+            "Trailbook: ${args_NAME} - copy instance info file"
     )
 endmacro()
 
@@ -738,14 +750,14 @@ function(add_trailbook)
             $<TARGET_PROPERTY:trailbook_${args_NAME},ADDITIONAL_DEPS_STAGE_POSTPROCESS_SPHINX_BEFORE>
             trailbook_${args_NAME}_stage_build_sphinx_after
     )
-    _add_trailbook_copy_versions_index_command()
-    _add_trailbook_copy_versions_json_command()
-    _add_trailbook_copy_instance_info_command()
     if(TRAILBOOK_INSTANCE_IS_RELEASE)
         _add_trailbook_replace_latest_command()
         _add_trailbook_copy_404_command()
         _add_trailbook_render_redirect_template_command()
     endif()
+    _add_trailbook_copy_instance_info_command()
+    _add_trailbook_copy_versions_index_command()
+    _add_trailbook_copy_versions_json_command()
 
     set(DEPS_STAGE_POSTPROCESS_SPHINX_AFTER
         trailbook_${args_NAME}_stage_postprocess_sphinx_before
