@@ -95,12 +95,12 @@ def load_versions_data(
     # Releases first (newest-named on top), then non-releases.
     releases = sorted(
         (v for v in versions_by_name.values() if v.get('is_release')),
-        key=lambda v: v['name'],
+        key=lambda v: v['display'],
         reverse=True,
     )
     non_releases = sorted(
         (v for v in versions_by_name.values() if not v.get('is_release')),
-        key=lambda v: v['name'],
+        key=lambda v: v['display'],
     )
     return {'versions': releases + non_releases}
 
